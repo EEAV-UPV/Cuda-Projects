@@ -1,4 +1,4 @@
-
+ï»¿
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
@@ -19,13 +19,13 @@
 #define IM_WIDTH 640
 #define IM_HEIGHT 480
 
-void read_obj(const char *filename, float **vertex, float **normals, float **color, int *n_vertex, int **faces, int *n_faces);
+void read_obj(const char* filename, float** vertex, float** normals, float** color, int* n_vertex, int** faces, int* n_faces);
 
-int write_bmp(const char *filename, int width, int height, char *rgb);
+int write_bmp(const char* filename, int width, int height, char* rgb);
 
 /////////// utilities CPU
 
-void unitary_vector(float *vec) {
+void unitary_vector(float* vec) {
 
 	float norm = sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
 	vec[0] = vec[0] / norm;
@@ -34,7 +34,7 @@ void unitary_vector(float *vec) {
 
 }
 
-void cross_product(float *res, float *a, float *b) {
+void cross_product(float* res, float* a, float* b) {
 
 	res[0] = a[1] * b[2] - a[2] * b[1];
 	res[1] = -(a[0] * b[2] - a[2] * b[0]);
@@ -42,7 +42,7 @@ void cross_product(float *res, float *a, float *b) {
 
 }
 
-float norm_vector(float *vec) {
+float norm_vector(float* vec) {
 
 	float sum = vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2];
 	return sqrt(sum);
@@ -51,7 +51,7 @@ float norm_vector(float *vec) {
 
 //////// utilities GPU
 
-__device__ void unitary_vector_d(float *vec) {
+__device__ void unitary_vector_d(float* vec) {
 
 	float norm = sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
 	vec[0] = vec[0] / norm;
@@ -60,7 +60,7 @@ __device__ void unitary_vector_d(float *vec) {
 
 }
 
-__device__ void cross_product_d(float *res, float *a, float *b) {
+__device__ void cross_product_d(float* res, float* a, float* b) {
 
 	res[0] = a[1] * b[2] - a[2] * b[1];
 	res[1] = a[2] * b[0] - a[0] * b[2];
@@ -68,7 +68,7 @@ __device__ void cross_product_d(float *res, float *a, float *b) {
 
 }
 
-__device__ float dot_product_d(float *a, float *b) {
+__device__ float dot_product_d(float* a, float* b) {
 
 	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
@@ -88,18 +88,15 @@ __device__ void substract_vectors_d(float* res, float* a, float* b)
 }
 /////// ray_tracer GPU
 
-__device__ void pixel_vertex_colors(float *out, float *view_point, float *dir_vector, int n_vertex, int n_faces, float *vertex, float *normals, float *color, int *faces) {
+__device__ void pixel_vertex_colors(float* out, float* view_point, float* dir_vector, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
 
 	// Completar (Ejercicio 3)
-
-}
-
-__device__ void pixel_coords(float *out, float *view_point, float *dir_vector, int n_vertex, int n_faces, float *vertex, float *normals, float *color, int *faces) {
-	
-	// Completar (Ejercicio 2)
 	int n_colisions = 0;
 
 	float R, G, B;
+
+	float distancia[3];
+	float dist_min = 1000000;
 
 	for (int n_f = 0; n_f < n_faces; n_f++) {
 
@@ -143,7 +140,7 @@ __device__ void pixel_coords(float *out, float *view_point, float *dir_vector, i
 
 		//dir_1 = sum(cross(coll_point - vert1, vert2 - vert1).*normal_plane);  (producto escalar y vectorial)
 		float dir_1, dir_2, dir_3;
-		float alpha, beta, theta;
+		float alpha, beta, theta, total;
 		float cross_product_coll_vert[3];
 		float substract_coll_vert1[3];
 		float substract_coll_vert2[3];
@@ -172,44 +169,191 @@ __device__ void pixel_coords(float *out, float *view_point, float *dir_vector, i
 		dir_3 = dot_product_d(cross_product_coll_vert, normal_plane);
 
 		//alpha = norm(cross(coll_point - vert2, coll_point - vert3) / 2;  (producto escalar y vectorial)
-		substract_vectors_d(substract_coll_vert2, vert2, coll_point);
-		substract_vectors_d(substract_coll_vert3, vert3, coll_point);
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
 		cross_product_d(cross_product_coll_vert_alpha, substract_coll_vert2, substract_coll_vert3);
-		
-		//beta = norm(cross(coll_point - vert1, coll_point - vert3) / 2; (producto escalar y vectorial)
-		substract_vectors_d(substract_coll_vert1, vert1, coll_point);
-		substract_vectors_d(substract_coll_vert3, vert3, coll_point);
-		cross_product_d(cross_product_coll_vert_beta, substract_coll_vert1, substract_coll_vert3);
-		
-		//theta = norm(cross(coll_point - vert1, coll_point - vert2) / 2; (producto escalar y vectorial)
-		substract_vectors_d(substract_coll_vert1, vert1, coll_point);
-		substract_vectors_d(substract_coll_vert2, vert2, coll_point);
-		cross_product_d(cross_product_coll_vert_theta, substract_coll_vert1, substract_coll_vert2);
-		
-		// if (dir_1>0 & dir_2>0 & dir_3>0) ||  (dir_1<0 & dir_2<0 & dir_3<0), col++
-		if ((dir_1 > 0 && dir_2 > 0 && dir_3 > 0) || (dir_1 < 0 && dir_2 < 0 && dir_3 < 0)) 
-		{
-			++n_colisions;
-			alpha = norm_vector_d(cross_product_coll_vert_alpha) / 2;
-			beta = norm_vector_d(cross_product_coll_vert_beta) / 2;
-			theta = norm_vector_d(cross_product_coll_vert_theta) / 2;
 
-			R = (alpha * color[(faces[(n_f * 3) + 0] * 3) + 0]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 0]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 0]);
-			G = (alpha * color[(faces[(n_f * 3) + 0] * 3) + 1]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 1]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 1]);
-			B = (alpha * color[(faces[(n_f * 3) + 0] * 3) + 2]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 2]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 2]);
-		}	
+		//beta = norm(cross(coll_point - vert1, coll_point - vert3) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_beta, substract_coll_vert1, substract_coll_vert3);
+
+		//theta = norm(cross(coll_point - vert1, coll_point - vert2) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		cross_product_d(cross_product_coll_vert_theta, substract_coll_vert1, substract_coll_vert2);
+
+		// if (dir_1>0 & dir_2>0 & dir_3>0) ||  (dir_1<0 & dir_2<0 & dir_3<0), col++
+		if ((dir_1 > 0 && dir_2 > 0 && dir_3 > 0) || (dir_1 < 0 && dir_2 < 0 && dir_3 < 0))
+		{
+			//++n_colisions;
+			substract_vectors_d(distancia, view_point, coll_point);
+			float dist = norm_vector_d(distancia);
+
+			if (dist < dist_min) {
+				dist_min = dist;
+
+				alpha = norm_vector_d(cross_product_coll_vert_alpha) / 2;
+				beta = norm_vector_d(cross_product_coll_vert_beta) / 2;
+				theta = norm_vector_d(cross_product_coll_vert_theta) / 2;
+
+				total = alpha + beta + theta;
+
+				alpha = alpha / total;
+				beta = beta / total;
+				theta = theta / total;
+
+				R = ((alpha * color[(faces[(n_f * 3) + 0] * 3) + 0]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 0]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 0])) * 255;
+				G = ((alpha * color[(faces[(n_f * 3) + 0] * 3) + 1]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 1]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 1])) * 255;
+				B = ((alpha * color[(faces[(n_f * 3) + 0] * 3) + 2]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 2]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 2])) * 255;
+
+				out[0] = R;
+				out[1] = G;
+				out[2] = B;
+			}
+		}
 	}
 
-	// Completar: Pasar de # of colisions [0-2] a grayscale [0-255]
-	out[0] = (n_colisions > 0) ? (R * 255) : 0;
-	out[1] = (n_colisions > 0) ? (G * 255) : 0;
-	out[2] = (n_colisions > 0) ? (B * 255) : 0;
+	if (dist_min == 1e6) {
+		out[0] = 0;
+		out[1] = 0;
+		out[2] = 0;
+	}
 }
 
-__device__ void pixel_collision(float *out, float *view_point, float *dir_vector, int n_vertex, int n_faces, float *vertex, float *normals, float *color, int *faces) {
-	
+__device__ void pixel_coords(float* out, float* view_point, float* dir_vector, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
+
+	// Completar (Ejercicio 2)
+	int n_colisions = 0;
+
+	float R, G, B;
+
+	float distancia[3];
+	float dist_min = 1000000;
+
+	for (int n_f = 0; n_f < n_faces; n_f++) {
+
+		float vert1[3];
+		float vert2[3];
+		float vert3[3];
+
+		/*vert1 = Mod.vertices(Mod.faces(i, 1), :);
+		vert2 = Mod.vertices(Mod.faces(i, 2), :);
+		vert3 = Mod.vertices(Mod.faces(i, 3), :);*/
+		for (int axis = 0; axis < 3; axis++)
+		{
+			vert1[axis] = vertex[(faces[(n_f * 3) + 0] * 3) + axis];
+			vert2[axis] = vertex[(faces[(n_f * 3) + 1] * 3) + axis];
+			vert3[axis] = vertex[(faces[(n_f * 3) + 2] * 3) + axis];
+		}
+
+		//normal_plane = cross(vert2 - vert1, vert3 - vert1);  (producto vectorial)
+		float normal_plane[3];
+		float substract_vert2_vert1[3];
+		float substract_vert3_vert1[3];
+
+		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
+		substract_vectors_d(substract_vert3_vert1, vert1, vert3);
+		cross_product_d(normal_plane, substract_vert2_vert1, substract_vert3_vert1);
+
+		//normal_plane = normal_plane. / norm(normal_plane);  (unitary vector)
+		unitary_vector_d(normal_plane);
+
+		//distance_plane= -sum( normal_plane .* vert1 ); (producto escalar)
+		float distance_plane = -dot_product_d(normal_plane, vert1);
+
+		//t = -(sum(normal_plane.*view_point) + distance_plane) / sum(normal_plane.*dir_vector); (productos escalares)
+		float t = -(dot_product_d(normal_plane, view_point) + distance_plane) / dot_product_d(normal_plane, dir_vector);
+
+		//coll_point=view_point + t * dir_vector;
+		float coll_point[3];
+		coll_point[0] = view_point[0] + (t * dir_vector[0]);
+		coll_point[1] = view_point[1] + (t * dir_vector[1]);
+		coll_point[2] = view_point[2] + (t * dir_vector[2]);
+
+		//dir_1 = sum(cross(coll_point - vert1, vert2 - vert1).*normal_plane);  (producto escalar y vectorial)
+		float dir_1, dir_2, dir_3;
+		float alpha, beta, theta, total;
+		float cross_product_coll_vert[3];
+		float substract_coll_vert1[3];
+		float substract_coll_vert2[3];
+		float substract_coll_vert3[3];
+		float substract_vert1_vert3[3];
+		float substract_vert3_vert2[3];
+		float cross_product_coll_vert_alpha[3];
+		float cross_product_coll_vert_beta[3];
+		float cross_product_coll_vert_theta[3];
+
+		substract_vectors_d(substract_coll_vert1, vert1, coll_point);
+		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert1, substract_vert2_vert1);
+		dir_1 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//dir_2 = sum(cross(coll_point - vert2, vert3 - vert2).*normal_plane); (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert2, vert2, coll_point);
+		substract_vectors_d(substract_vert3_vert2, vert2, vert3);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert2, substract_vert3_vert2);
+		dir_2 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//dir_3 = sum(cross(coll_point - vert3, vert1 - vert3).*normal_plane); (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert3, vert3, coll_point);
+		substract_vectors_d(substract_vert1_vert3, vert3, vert1);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert3, substract_vert1_vert3);
+		dir_3 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//alpha = norm(cross(coll_point - vert2, coll_point - vert3) / 2;  (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_alpha, substract_coll_vert2, substract_coll_vert3);
+
+		//beta = norm(cross(coll_point - vert1, coll_point - vert3) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_beta, substract_coll_vert1, substract_coll_vert3);
+
+		//theta = norm(cross(coll_point - vert1, coll_point - vert2) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		cross_product_d(cross_product_coll_vert_theta, substract_coll_vert1, substract_coll_vert2);
+
+		// if (dir_1>0 & dir_2>0 & dir_3>0) ||  (dir_1<0 & dir_2<0 & dir_3<0), col++
+		if ((dir_1 > 0 && dir_2 > 0 && dir_3 > 0) || (dir_1 < 0 && dir_2 < 0 && dir_3 < 0))
+		{
+			//++n_colisions;
+			substract_vectors_d(distancia, view_point, coll_point);
+			float dist = norm_vector_d(distancia);
+
+			if (dist < dist_min) {
+				dist_min = dist;
+
+				alpha = norm_vector_d(cross_product_coll_vert_alpha) / 2;
+				beta = norm_vector_d(cross_product_coll_vert_beta) / 2;
+				theta = norm_vector_d(cross_product_coll_vert_theta) / 2;
+
+				total = alpha + beta + theta;
+
+				R = alpha / total * 255;
+				G = beta / total * 255;
+				B = theta / total * 255;
+
+				out[0] = R;
+				out[1] = G;
+				out[2] = B;
+			}
+		}
+	}
+
+	if (dist_min == 1e6) {
+		out[0] = 0;
+		out[1] = 0;
+		out[2] = 0;
+	}
+}
+
+__device__ void pixel_collision(float* out, float* view_point, float* dir_vector, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
+
 	// Completar (Ejercicio 1)
-	
+
 	int n_colisions = 0;
 
 	for (int n_f = 0; n_f < n_faces; n_f++) {
@@ -232,11 +376,11 @@ __device__ void pixel_collision(float *out, float *view_point, float *dir_vector
 		float normal_plane[3];
 		float substract_vert2_vert1[3];
 		float substract_vert3_vert1[3];
-		
+
 		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
 		substract_vectors_d(substract_vert3_vert1, vert1, vert3);
 		cross_product_d(normal_plane, substract_vert2_vert1, substract_vert3_vert1);
-		
+
 		//normal_plane = normal_plane. / norm(normal_plane);  (unitary vector)
 		unitary_vector_d(normal_plane);
 
@@ -245,13 +389,13 @@ __device__ void pixel_collision(float *out, float *view_point, float *dir_vector
 
 		//t = -(sum(normal_plane.*view_point) + distance_plane) / sum(normal_plane.*dir_vector); (productos escalares)
 		float t = -(dot_product_d(normal_plane, view_point) + distance_plane) / dot_product_d(normal_plane, dir_vector);
-		
+
 		//coll_point=view_point + t * dir_vector;
 		float coll_point[3];
 		coll_point[0] = view_point[0] + (t * dir_vector[0]);
 		coll_point[1] = view_point[1] + (t * dir_vector[1]);
 		coll_point[2] = view_point[2] + (t * dir_vector[2]);
-		
+
 		//dir_1 = sum(cross(coll_point - vert1, vert2 - vert1).*normal_plane);  (producto escalar y vectorial)
 		float dir_1;
 		float cross_product_coll_vert[3];
@@ -286,24 +430,24 @@ __device__ void pixel_collision(float *out, float *view_point, float *dir_vector
 		if ((dir_1 > 0 && dir_2 > 0 && dir_3 > 0) || (dir_1 < 0 && dir_2 < 0 && dir_3 < 0))
 			++n_colisions;
 	}
-		   
+
 	// Completar: Pasar de # of colisions [0-2] a grayscale [0-255]
 	out[0] = (n_colisions > 0) ? 255 : 0;
 	out[1] = (n_colisions > 0) ? 255 : 0;
 	out[2] = (n_colisions > 0) ? 255 : 0;
 }
 
-__global__ void kernel_raytracer(unsigned char *dev_rgb, int size, float *fov_00_d, float *fov_w0_d, float *fov_0h_d, float *view_point, int n_vertex, int n_faces, float *vertex, float *normals, float *color, int *faces) {
-	   	 
+__global__ void kernel_raytracer(unsigned char* dev_rgb, int size, float* fov_00_d, float* fov_w0_d, float* fov_0h_d, float* view_point, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
+
 	int pos_x = threadIdx.x + (blockDim.x * blockIdx.x);
 	int pos_y = threadIdx.y + (blockDim.y * blockIdx.y);
 
 	if (pos_x < IM_WIDTH && pos_y < IM_HEIGHT) {
-		
+
 		float pos_screen[3];
-		pos_screen[0] = fov_00_d[0] + (fov_w0_d[0] - fov_00_d[0])*pos_x / (IM_WIDTH - 1) + (fov_0h_d[0] - fov_00_d[0])*pos_y / (IM_HEIGHT - 1);
-		pos_screen[1] = fov_00_d[1] + (fov_w0_d[1] - fov_00_d[1])*pos_x / (IM_WIDTH - 1) + (fov_0h_d[1] - fov_00_d[1])*pos_y / (IM_HEIGHT - 1);
-		pos_screen[2] = fov_00_d[2] + (fov_w0_d[2] - fov_00_d[2])*pos_x / (IM_WIDTH - 1) + (fov_0h_d[2] - fov_00_d[2])*pos_y / (IM_HEIGHT - 1);
+		pos_screen[0] = fov_00_d[0] + (fov_w0_d[0] - fov_00_d[0]) * pos_x / (IM_WIDTH - 1) + (fov_0h_d[0] - fov_00_d[0]) * pos_y / (IM_HEIGHT - 1);
+		pos_screen[1] = fov_00_d[1] + (fov_w0_d[1] - fov_00_d[1]) * pos_x / (IM_WIDTH - 1) + (fov_0h_d[1] - fov_00_d[1]) * pos_y / (IM_HEIGHT - 1);
+		pos_screen[2] = fov_00_d[2] + (fov_w0_d[2] - fov_00_d[2]) * pos_x / (IM_WIDTH - 1) + (fov_0h_d[2] - fov_00_d[2]) * pos_y / (IM_HEIGHT - 1);
 
 		float dir_vector[3];
 		dir_vector[0] = pos_screen[0] - view_point[0];
@@ -312,8 +456,8 @@ __global__ void kernel_raytracer(unsigned char *dev_rgb, int size, float *fov_00
 
 		float out[3];
 		//pixel_collision(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 1
-		pixel_coords(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 2
-		// pixel_vertex_colors(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 3
+		//pixel_coords(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 2
+		pixel_vertex_colors(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 3
 
 		/////////
 
@@ -323,9 +467,9 @@ __global__ void kernel_raytracer(unsigned char *dev_rgb, int size, float *fov_00
 	}
 }
 
-void ray_tracer(int w, int h, char *rgb, int n_vertex, int n_faces, float *vertex, float *normals, float *color, int *faces) {
-	
-	float fov_00[3] = { -80, 20, 15 };	
+void ray_tracer(int w, int h, char* rgb, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
+
+	float fov_00[3] = { -80, 20, 15 };
 	float fov_w0[3] = { -80, -15, 15 };
 	float fov_0h[3] = { -80, 20, -15 };
 
@@ -340,10 +484,10 @@ void ray_tracer(int w, int h, char *rgb, int n_vertex, int n_faces, float *verte
 	vec_h[2] = fov_0h[2] - fov_00[2];
 
 	float vec_w[3];
-	vec_w[0] = fov_w0[0] - fov_00[0]; 
-	vec_w[1] = fov_w0[1] - fov_00[1]; 
+	vec_w[0] = fov_w0[0] - fov_00[0];
+	vec_w[1] = fov_w0[1] - fov_00[1];
 	vec_w[2] = fov_w0[2] - fov_00[2];
-	
+
 	float normal_screen[3];
 	cross_product(normal_screen, vec_h, vec_w);
 	unitary_vector(normal_screen);
@@ -355,13 +499,13 @@ void ray_tracer(int w, int h, char *rgb, int n_vertex, int n_faces, float *verte
 
 	//////////// copio variables de vista
 
-	unsigned char *dev_rgb;
+	unsigned char* dev_rgb;
 	int size = w * h;
 
-	float *fov_00_d;
-	float *fov_w0_d;
-	float *fov_0h_d;
-	float *view_point_d;
+	float* fov_00_d;
+	float* fov_w0_d;
+	float* fov_0h_d;
+	float* view_point_d;
 
 	cudaMalloc((void**)&dev_rgb, size * 3 * sizeof(char));
 	cudaMalloc((void**)&fov_00_d, 3 * sizeof(float));
@@ -376,56 +520,56 @@ void ray_tracer(int w, int h, char *rgb, int n_vertex, int n_faces, float *verte
 
 	/////// copio variables de modelo
 
-	float *vertex_d;
-	float *normals_d;
-	float *color_d;
-	int *faces_d;
-	
+	float* vertex_d;
+	float* normals_d;
+	float* color_d;
+	int* faces_d;
+
 	cudaMalloc((void**)&vertex_d, 3 * n_vertex * sizeof(float));
 	cudaMalloc((void**)&normals_d, 3 * n_vertex * sizeof(float));
 	cudaMalloc((void**)&color_d, 3 * n_vertex * sizeof(float));
 	cudaMalloc((void**)&faces_d, 3 * n_faces * sizeof(int));
-	
+
 	cudaMemcpy(vertex_d, vertex, 3 * n_vertex * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(normals_d, normals, 3 * n_vertex * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(color_d, color, 3 * n_vertex * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(faces_d, faces, 3 * n_faces * sizeof(int), cudaMemcpyHostToDevice);
-	
+
 	////// lanzo kernel
 
-	dim3 grid_size(IM_WIDTH/32 + 1, IM_HEIGHT / 32 + 1);
-	dim3 block_size(32,32);
-		
-	kernel_raytracer <<< grid_size, block_size >> >
+	dim3 grid_size(IM_WIDTH / 32 + 1, IM_HEIGHT / 32 + 1);
+	dim3 block_size(32, 32);
+
+	kernel_raytracer << < grid_size, block_size >> >
 		(dev_rgb, size, fov_00_d, fov_w0_d, fov_0h_d, view_point_d, n_vertex, n_faces, vertex_d, normals_d, color_d, faces_d);
 
 	printf("Kernel done\n");
 
 	cudaMemcpy(rgb, dev_rgb, size * 3 * sizeof(char), cudaMemcpyDeviceToHost);
 	cudaFree(dev_rgb);
-	   	  
+
 }
 
 /////// Main
 
 int main()
 {
-			
+
 	////// read obj
-	
-	const char *filename_in = "./colors.obj";
-	
+
+	const char* filename_in = "./colors.obj";
+
 	int n_vertex, n_faces;
-	float *vertex;
-	float *normals;
-	float *color;
-	int *faces;
-	   	
+	float* vertex;
+	float* normals;
+	float* color;
+	int* faces;
+
 	read_obj(filename_in, &vertex, &normals, &color, &n_vertex, &faces, &n_faces);
-	
+
 	printf("\n %d Vertex: \n", n_vertex);
-	for (int i_v= 0; i_v < n_vertex; i_v++) {
-		printf("(#%d) x:%f , y:%f , z:%f ; r:%f , g:%f , b:%f \n", i_v, vertex[i_v*3], vertex[i_v * 3+1], vertex[i_v * 3+2], color[i_v*3], color[i_v * 3 + 1], color[i_v * 3 + 2]);
+	for (int i_v = 0; i_v < n_vertex; i_v++) {
+		printf("(#%d) x:%f , y:%f , z:%f ; r:%f , g:%f , b:%f \n", i_v, vertex[i_v * 3], vertex[i_v * 3 + 1], vertex[i_v * 3 + 2], color[i_v * 3], color[i_v * 3 + 1], color[i_v * 3 + 2]);
 		printf("nx: %f , ny: %f , nz: %f \n", normals[i_v * 3], normals[i_v * 3 + 1], normals[i_v * 3 + 2]);
 	}
 
@@ -438,18 +582,18 @@ int main()
 
 	///// GPU 
 
-	const char *filename = "image_out.bmp";
+	const char* filename = "image_out.bmp";
 	int width = IM_WIDTH;
 	int height = IM_HEIGHT;
-	char *rgb = new char[height*width * 3];
-	   	
+	char* rgb = new char[height * width * 3];
+
 	ray_tracer(width, height, rgb, n_vertex, n_faces, vertex, normals, color, faces);
-	
+
 	////// write bmp
 
 	write_bmp(filename, width, height, rgb);
-		
-    return 0;
+
+	return 0;
 }
 
 //////// read/write files
@@ -475,9 +619,9 @@ struct BMPHeader
 						  are important */
 };
 
-void read_obj(const char *filename, float **vertex, float **normals, float **color, int *n_vertex, int **faces, int *n_faces)
+void read_obj(const char* filename, float** vertex, float** normals, float** color, int* n_vertex, int** faces, int* n_faces)
 {
-	FILE * file = fopen(filename, "r");
+	FILE* file = fopen(filename, "r");
 	if (file == NULL) {
 		printf("Impossible to open the file !\n");
 		return;
@@ -494,7 +638,7 @@ void read_obj(const char *filename, float **vertex, float **normals, float **col
 	while (1) {
 
 		char lineHeader[128];
-		// Lee la primera palabra de la línea
+		// Lee la primera palabra de la lï¿½nea
 		int res = fscanf(file, "%s", lineHeader);
 
 		if (res == EOF)
@@ -578,13 +722,13 @@ void read_obj(const char *filename, float **vertex, float **normals, float **col
 	}
 }
 
-int write_bmp(const char *filename, int width, int height, char *rgb)
+int write_bmp(const char* filename, int width, int height, char* rgb)
 {
 	int i, j, ipos;
 	int bytesPerLine;
-	char *line;
+	char* line;
 
-	FILE *file;
+	FILE* file;
 	struct BMPHeader bmph;
 
 	/* The length of each line must be a multiple of 4 bytes */
@@ -645,8 +789,3 @@ int write_bmp(const char *filename, int width, int height, char *rgb)
 
 	return(1);
 }
-
-
-
-
-
