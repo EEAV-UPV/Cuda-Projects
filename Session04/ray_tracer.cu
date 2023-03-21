@@ -23,6 +23,35 @@ void read_obj(const char* filename, float** vertex, float** normals, float** col
 
 int write_bmp(const char* filename, int width, int height, char* rgb);
 
+
+void readBMP_RGB(const char* filename, unsigned char** data_rgb, int* width_rgb, int* height_rgb)
+{
+	int i;
+	FILE* f = fopen(filename, "rb");
+	char info[54];
+	fread(info, sizeof(char), 54, f); // read the 54-byte header
+
+	// extract image height and width from header
+	int width = *(int*)&info[18];
+	int height = *(int*)&info[22];
+
+	int size = 3 * width * height;
+	*data_rgb = new unsigned char[size];// allocate 3 bytes per pixel
+
+	fread(*data_rgb, sizeof(char), size, f); // read the rest of the data at once
+	fclose(f);
+
+	for (i = 0; i < size; i += 3)
+	{
+		char tmp = (*data_rgb)[i];
+		(*data_rgb)[i] = (*data_rgb)[i + 2];
+		(*data_rgb)[i + 2] = tmp;
+	}
+
+	width_rgb[0] = width;
+	height_rgb[0] = height;
+}
+
 /////////// utilities CPU
 
 void unitary_vector(float* vec) {
@@ -86,7 +115,311 @@ __device__ void substract_vectors_d(float* res, float* a, float* b)
 	res[1] = b[1] - a[1];
 	res[2] = b[2] - a[2];
 }
+
+__device__ void mean_vectors_d(float* res, float* a, float* b, float* c)
+{
+	res[0] = (a[0] + b[0] + c[0]) / 3;
+	res[1] = (a[1] + b[1] + c[1]) / 3;
+	res[2] = (a[2] + b[2] + c[2]) / 3;
+}
+
+__device__ void escalar_product_vector_d(float* res, float* v, float escalar)
+{
+	res[0] = v[0] * escalar;
+	res[1] = v[1] * escalar;
+	res[2] = v[2] * escalar;
+}
 /////// ray_tracer GPU
+
+__device__ void pixel_texture_mapping_flat(float* out, float* view_point, float* dir_vector, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces, unsigned char* data_rgb_TM, int width_texture, int height_texture, float* light_dir)
+{
+	// Completar (Ejercicio 5)
+	int n_colisions = 0;
+
+	int R, G, B;
+
+	float distancia[3];
+	float dist_min = 1000000;
+	float N[3];
+	float shade_val;
+
+	for (int n_f = 0; n_f < n_faces; n_f++) {
+
+		float vert1[3];
+		float norm_vert1[3];
+		float vert2[3];
+		float norm_vert2[3];
+		float vert3[3];
+		float norm_vert3[3];
+
+		/*vert1 = Mod.vertices(Mod.faces(i, 1), :);
+		vert2 = Mod.vertices(Mod.faces(i, 2), :);
+		vert3 = Mod.vertices(Mod.faces(i, 3), :);*/
+		for (int axis = 0; axis < 3; axis++)
+		{
+			vert1[axis] = vertex[(faces[(n_f * 3) + 0] * 3) + axis];
+			norm_vert1[axis] = normals[(faces[(n_f * 3) + 0] * 3) + axis];
+			vert2[axis] = vertex[(faces[(n_f * 3) + 1] * 3) + axis];
+			norm_vert2[axis] = normals[(faces[(n_f * 3) + 1] * 3) + axis];
+			vert3[axis] = vertex[(faces[(n_f * 3) + 2] * 3) + axis];
+			norm_vert3[axis] = normals[(faces[(n_f * 3) + 2] * 3) + axis];
+		}
+
+		//normal_plane = cross(vert2 - vert1, vert3 - vert1);  (producto vectorial)
+		float normal_plane[3];
+		float substract_vert2_vert1[3];
+		float substract_vert3_vert1[3];
+
+		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
+		substract_vectors_d(substract_vert3_vert1, vert1, vert3);
+		cross_product_d(normal_plane, substract_vert2_vert1, substract_vert3_vert1);
+
+		//normal_plane = normal_plane. / norm(normal_plane);  (unitary vector)
+		unitary_vector_d(normal_plane);
+
+		//distance_plane= -sum( normal_plane .* vert1 ); (producto escalar)
+		float distance_plane = -dot_product_d(normal_plane, vert1);
+
+		//t = -(sum(normal_plane.*view_point) + distance_plane) / sum(normal_plane.*dir_vector); (productos escalares)
+		float t = -(dot_product_d(normal_plane, view_point) + distance_plane) / dot_product_d(normal_plane, dir_vector);
+
+		//coll_point=view_point + t * dir_vector;
+		float coll_point[3];
+		coll_point[0] = view_point[0] + (t * dir_vector[0]);
+		coll_point[1] = view_point[1] + (t * dir_vector[1]);
+		coll_point[2] = view_point[2] + (t * dir_vector[2]);
+
+		//dir_1 = sum(cross(coll_point - vert1, vert2 - vert1).*normal_plane);  (producto escalar y vectorial)
+		float dir_1, dir_2, dir_3;
+		float alpha, beta, theta, total;
+		float cross_product_coll_vert[3];
+		float substract_coll_vert1[3];
+		float substract_coll_vert2[3];
+		float substract_coll_vert3[3];
+		float substract_vert1_vert3[3];
+		float substract_vert3_vert2[3];
+		float cross_product_coll_vert_alpha[3];
+		float cross_product_coll_vert_beta[3];
+		float cross_product_coll_vert_theta[3];
+
+		substract_vectors_d(substract_coll_vert1, vert1, coll_point);
+		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert1, substract_vert2_vert1);
+		dir_1 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//dir_2 = sum(cross(coll_point - vert2, vert3 - vert2).*normal_plane); (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert2, vert2, coll_point);
+		substract_vectors_d(substract_vert3_vert2, vert2, vert3);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert2, substract_vert3_vert2);
+		dir_2 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//dir_3 = sum(cross(coll_point - vert3, vert1 - vert3).*normal_plane); (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert3, vert3, coll_point);
+		substract_vectors_d(substract_vert1_vert3, vert3, vert1);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert3, substract_vert1_vert3);
+		dir_3 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//alpha = norm(cross(coll_point - vert2, coll_point - vert3) / 2;  (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_alpha, substract_coll_vert2, substract_coll_vert3);
+
+		//beta = norm(cross(coll_point - vert1, coll_point - vert3) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_beta, substract_coll_vert1, substract_coll_vert3);
+
+		//theta = norm(cross(coll_point - vert1, coll_point - vert2) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		cross_product_d(cross_product_coll_vert_theta, substract_coll_vert1, substract_coll_vert2);
+
+		// if (dir_1>0 & dir_2>0 & dir_3>0) ||  (dir_1<0 & dir_2<0 & dir_3<0), col++
+		if ((dir_1 > 0 && dir_2 > 0 && dir_3 > 0) || (dir_1 < 0 && dir_2 < 0 && dir_3 < 0))
+		{
+			//++n_colisions;
+			float new_light_direction[3];
+			substract_vectors_d(distancia, view_point, coll_point);
+			float dist = norm_vector_d(distancia);
+
+			if (dist < dist_min) {
+				dist_min = dist;
+
+				alpha = norm_vector_d(cross_product_coll_vert_alpha) / 2;
+				beta = norm_vector_d(cross_product_coll_vert_beta) / 2;
+				theta = norm_vector_d(cross_product_coll_vert_theta) / 2;
+
+				total = alpha + beta + theta;
+
+				alpha = alpha / total;
+				beta = beta / total;
+				theta = theta / total;
+
+				R = round(((alpha * color[(faces[(n_f * 3) + 0] * 3) + 0]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 0]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 0])) * width_texture);
+				G = round(((alpha * color[(faces[(n_f * 3) + 0] * 3) + 1]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 1]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 1])) * height_texture);
+
+				float total2 = norm_vector_d(vert1) + norm_vector_d(vert2) + norm_vector_d(vert3);
+
+				mean_vectors_d(N, norm_vert1, norm_vert2, norm_vert3);
+				escalar_product_vector_d(new_light_direction, light_dir, -1.f);
+				shade_val = dot_product_d(N, new_light_direction) / norm_vector_d(N);
+				shade_val = shade_val > 0 ? shade_val : 0;
+				//N = (norm_vector_d(vert1) + norm_vector_d(vert2) + norm_vector_d(vert3)) / 3;
+
+				out[0] = round(data_rgb_TM[((R + (G * width_texture)) * 3) + 0] * shade_val);
+				out[1] = round(data_rgb_TM[((R + (G * width_texture)) * 3) + 1] * shade_val);
+				out[2] = round(data_rgb_TM[((R + (G * width_texture)) * 3) + 2] * shade_val);
+			}
+		}
+	}
+
+	if (dist_min == 1e6) {
+		if (dir_vector[2] > 0)
+		{
+			out[0] = round(0.5 * 255);
+			out[1] = round(0.75 * 255);
+			out[2] = 255;
+		}
+		else {
+			out[0] = round(255 * abs(dir_vector[2] / 20));
+			out[1] = round(0.75 * 255 * abs(dir_vector[2] / 20));
+			out[2] = round(0.75 * 255 * abs(dir_vector[2] / 20));
+		}
+	}
+}
+
+__device__ void pixel_texture_mapping(float* out, float* view_point, float* dir_vector, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces, unsigned char* data_rgb_TM, int width_texture, int height_texture) 
+{
+	// Completar (Ejercicio 4)
+	int n_colisions = 0;
+
+	int R, G, B;
+
+	float distancia[3];
+	float dist_min = 1000000;
+
+	for (int n_f = 0; n_f < n_faces; n_f++) {
+
+		float vert1[3];
+		float vert2[3];
+		float vert3[3];
+
+		/*vert1 = Mod.vertices(Mod.faces(i, 1), :);
+		vert2 = Mod.vertices(Mod.faces(i, 2), :);
+		vert3 = Mod.vertices(Mod.faces(i, 3), :);*/
+		for (int axis = 0; axis < 3; axis++)
+		{
+			vert1[axis] = vertex[(faces[(n_f * 3) + 0] * 3) + axis];
+			vert2[axis] = vertex[(faces[(n_f * 3) + 1] * 3) + axis];
+			vert3[axis] = vertex[(faces[(n_f * 3) + 2] * 3) + axis];
+		}
+
+		//normal_plane = cross(vert2 - vert1, vert3 - vert1);  (producto vectorial)
+		float normal_plane[3];
+		float substract_vert2_vert1[3];
+		float substract_vert3_vert1[3];
+
+		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
+		substract_vectors_d(substract_vert3_vert1, vert1, vert3);
+		cross_product_d(normal_plane, substract_vert2_vert1, substract_vert3_vert1);
+
+		//normal_plane = normal_plane. / norm(normal_plane);  (unitary vector)
+		unitary_vector_d(normal_plane);
+
+		//distance_plane= -sum( normal_plane .* vert1 ); (producto escalar)
+		float distance_plane = -dot_product_d(normal_plane, vert1);
+
+		//t = -(sum(normal_plane.*view_point) + distance_plane) / sum(normal_plane.*dir_vector); (productos escalares)
+		float t = -(dot_product_d(normal_plane, view_point) + distance_plane) / dot_product_d(normal_plane, dir_vector);
+
+		//coll_point=view_point + t * dir_vector;
+		float coll_point[3];
+		coll_point[0] = view_point[0] + (t * dir_vector[0]);
+		coll_point[1] = view_point[1] + (t * dir_vector[1]);
+		coll_point[2] = view_point[2] + (t * dir_vector[2]);
+
+		//dir_1 = sum(cross(coll_point - vert1, vert2 - vert1).*normal_plane);  (producto escalar y vectorial)
+		float dir_1, dir_2, dir_3;
+		float alpha, beta, theta, total;
+		float cross_product_coll_vert[3];
+		float substract_coll_vert1[3];
+		float substract_coll_vert2[3];
+		float substract_coll_vert3[3];
+		float substract_vert1_vert3[3];
+		float substract_vert3_vert2[3];
+		float cross_product_coll_vert_alpha[3];
+		float cross_product_coll_vert_beta[3];
+		float cross_product_coll_vert_theta[3];
+
+		substract_vectors_d(substract_coll_vert1, vert1, coll_point);
+		substract_vectors_d(substract_vert2_vert1, vert1, vert2);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert1, substract_vert2_vert1);
+		dir_1 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//dir_2 = sum(cross(coll_point - vert2, vert3 - vert2).*normal_plane); (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert2, vert2, coll_point);
+		substract_vectors_d(substract_vert3_vert2, vert2, vert3);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert2, substract_vert3_vert2);
+		dir_2 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//dir_3 = sum(cross(coll_point - vert3, vert1 - vert3).*normal_plane); (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert3, vert3, coll_point);
+		substract_vectors_d(substract_vert1_vert3, vert3, vert1);
+		cross_product_d(cross_product_coll_vert, substract_coll_vert3, substract_vert1_vert3);
+		dir_3 = dot_product_d(cross_product_coll_vert, normal_plane);
+
+		//alpha = norm(cross(coll_point - vert2, coll_point - vert3) / 2;  (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_alpha, substract_coll_vert2, substract_coll_vert3);
+
+		//beta = norm(cross(coll_point - vert1, coll_point - vert3) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert3, coll_point, vert3);
+		cross_product_d(cross_product_coll_vert_beta, substract_coll_vert1, substract_coll_vert3);
+
+		//theta = norm(cross(coll_point - vert1, coll_point - vert2) / 2; (producto escalar y vectorial)
+		substract_vectors_d(substract_coll_vert1, coll_point, vert1);
+		substract_vectors_d(substract_coll_vert2, coll_point, vert2);
+		cross_product_d(cross_product_coll_vert_theta, substract_coll_vert1, substract_coll_vert2);
+
+		// if (dir_1>0 & dir_2>0 & dir_3>0) ||  (dir_1<0 & dir_2<0 & dir_3<0), col++
+		if ((dir_1 > 0 && dir_2 > 0 && dir_3 > 0) || (dir_1 < 0 && dir_2 < 0 && dir_3 < 0))
+		{
+			//++n_colisions;
+			substract_vectors_d(distancia, view_point, coll_point);
+			float dist = norm_vector_d(distancia);
+
+			if (dist < dist_min) {
+				dist_min = dist;
+
+				alpha = norm_vector_d(cross_product_coll_vert_alpha) / 2;
+				beta = norm_vector_d(cross_product_coll_vert_beta) / 2;
+				theta = norm_vector_d(cross_product_coll_vert_theta) / 2;
+
+				total = alpha + beta + theta;
+
+				alpha = alpha / total;
+				beta = beta / total;
+				theta = theta / total;
+
+				R = round(((alpha * color[(faces[(n_f * 3) + 0] * 3) + 0]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 0]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 0])) * width_texture);
+				G = round(((alpha * color[(faces[(n_f * 3) + 0] * 3) + 1]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 1]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 1])) * height_texture);
+				B = round(((alpha * color[(faces[(n_f * 3) + 0] * 3) + 2]) + (beta * color[(faces[(n_f * 3) + 1] * 3) + 2]) + (theta * color[(faces[(n_f * 3) + 2] * 3) + 2])) * height_texture);
+		
+				out[0] = data_rgb_TM[((R + (G * width_texture)) * 3) + 0];
+				out[1] = data_rgb_TM[((R + (G * width_texture)) * 3) + 1];
+				out[2] = data_rgb_TM[((R + (G * width_texture)) * 3) + 2];
+			}
+		}
+	}
+
+	if (dist_min == 1e6) {
+		out[0] = 0;
+		out[1] = 0;
+		out[2] = 0;
+	}
+}
 
 __device__ void pixel_vertex_colors(float* out, float* view_point, float* dir_vector, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
 
@@ -437,7 +770,7 @@ __device__ void pixel_collision(float* out, float* view_point, float* dir_vector
 	out[2] = (n_colisions > 0) ? 255 : 0;
 }
 
-__global__ void kernel_raytracer(unsigned char* dev_rgb, int size, float* fov_00_d, float* fov_w0_d, float* fov_0h_d, float* view_point, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
+__global__ void kernel_raytracer(unsigned char* dev_rgb, int size, float* fov_00_d, float* fov_w0_d, float* fov_0h_d, float* view_point, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces, unsigned char* data_rgb_TM, int width_texture, int height_texture, float* light_dir) {
 
 	int pos_x = threadIdx.x + (blockDim.x * blockIdx.x);
 	int pos_y = threadIdx.y + (blockDim.y * blockIdx.y);
@@ -455,9 +788,11 @@ __global__ void kernel_raytracer(unsigned char* dev_rgb, int size, float* fov_00
 		dir_vector[2] = pos_screen[2] - view_point[2];
 
 		float out[3];
-		//pixel_collision(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 1
-		//pixel_coords(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 2
-		pixel_vertex_colors(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);  //Ejercicio 3
+		//pixel_collision(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);													//Ejercicio 1
+		//pixel_coords(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);														//Ejercicio 2
+		//pixel_vertex_colors(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces);												//Ejercicio 3
+		//pixel_texture_mapping(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces, data_rgb_TM, width_texture, height_texture);   //Ejercicio 4
+		pixel_texture_mapping_flat(out, view_point, dir_vector, n_vertex, n_faces, vertex, normals, color, faces, data_rgb_TM, width_texture, height_texture, light_dir);   //Ejercicio 5
 
 		/////////
 
@@ -467,7 +802,13 @@ __global__ void kernel_raytracer(unsigned char* dev_rgb, int size, float* fov_00
 	}
 }
 
-void ray_tracer(int w, int h, char* rgb, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces) {
+void ray_tracer(int w, int h, char* rgb, int n_vertex, int n_faces, float* vertex, float* normals, float* color, int* faces, unsigned char* data_rgb_TM, int width_texture, int height_texture) {
+
+	float light_dir[3] = { 0.3, 0.5, -0.7 };
+	float norm_light_dir = norm_vector(light_dir);
+	light_dir[0] = light_dir[0] / norm_light_dir;
+	light_dir[1] = light_dir[1] / norm_light_dir;
+	light_dir[2] = light_dir[2] / norm_light_dir;
 
 	float fov_00[3] = { -80, 20, 15 };
 	float fov_w0[3] = { -80, -15, 15 };
@@ -506,6 +847,7 @@ void ray_tracer(int w, int h, char* rgb, int n_vertex, int n_faces, float* verte
 	float* fov_w0_d;
 	float* fov_0h_d;
 	float* view_point_d;
+	float* light_dir_d;
 
 	cudaMalloc((void**)&dev_rgb, size * 3 * sizeof(char));
 	cudaMalloc((void**)&fov_00_d, 3 * sizeof(float));
@@ -525,15 +867,21 @@ void ray_tracer(int w, int h, char* rgb, int n_vertex, int n_faces, float* verte
 	float* color_d;
 	int* faces_d;
 
+	unsigned char* data_rgb_TM_d;
+
 	cudaMalloc((void**)&vertex_d, 3 * n_vertex * sizeof(float));
 	cudaMalloc((void**)&normals_d, 3 * n_vertex * sizeof(float));
 	cudaMalloc((void**)&color_d, 3 * n_vertex * sizeof(float));
 	cudaMalloc((void**)&faces_d, 3 * n_faces * sizeof(int));
+	cudaMalloc((void**)&data_rgb_TM_d, 3 * width_texture * height_texture * sizeof(char));
+	cudaMalloc((void**)&light_dir_d, 3 * sizeof(float));
 
 	cudaMemcpy(vertex_d, vertex, 3 * n_vertex * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(normals_d, normals, 3 * n_vertex * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(color_d, color, 3 * n_vertex * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(faces_d, faces, 3 * n_faces * sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(data_rgb_TM_d, data_rgb_TM, 3 * width_texture * height_texture * sizeof(char), cudaMemcpyHostToDevice);
+	cudaMemcpy(light_dir_d, light_dir, 3 * sizeof(float), cudaMemcpyHostToDevice);
 
 	////// lanzo kernel
 
@@ -541,7 +889,7 @@ void ray_tracer(int w, int h, char* rgb, int n_vertex, int n_faces, float* verte
 	dim3 block_size(32, 32);
 
 	kernel_raytracer << < grid_size, block_size >> >
-		(dev_rgb, size, fov_00_d, fov_w0_d, fov_0h_d, view_point_d, n_vertex, n_faces, vertex_d, normals_d, color_d, faces_d);
+		(dev_rgb, size, fov_00_d, fov_w0_d, fov_0h_d, view_point_d, n_vertex, n_faces, vertex_d, normals_d, color_d, faces_d, data_rgb_TM_d, width_texture, height_texture, light_dir_d);
 
 	printf("Kernel done\n");
 
@@ -558,6 +906,7 @@ int main()
 	////// read obj
 
 	const char* filename_in = "./colors.obj";
+	const char* filename_texture = "./cuadros2.bmp";
 
 	int n_vertex, n_faces;
 	float* vertex;
@@ -565,7 +914,12 @@ int main()
 	float* color;
 	int* faces;
 
+	unsigned char* data_rgb_TM;
+	int width_texture;
+	int height_texture;
+
 	read_obj(filename_in, &vertex, &normals, &color, &n_vertex, &faces, &n_faces);
+	readBMP_RGB(filename_texture, &data_rgb_TM, &width_texture, &height_texture);
 
 	printf("\n %d Vertex: \n", n_vertex);
 	for (int i_v = 0; i_v < n_vertex; i_v++) {
@@ -587,7 +941,7 @@ int main()
 	int height = IM_HEIGHT;
 	char* rgb = new char[height * width * 3];
 
-	ray_tracer(width, height, rgb, n_vertex, n_faces, vertex, normals, color, faces);
+	ray_tracer(width, height, rgb, n_vertex, n_faces, vertex, normals, color, faces, data_rgb_TM, width_texture, height_texture);
 
 	////// write bmp
 
